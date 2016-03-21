@@ -1,0 +1,406 @@
+---
+title: "EntropyMI_StatTest"
+output: html_document
+---
+
+```{r loadLibary}
+rm(list=ls())
+library(plyr)
+library(ggplot2)
+library(ggthemes)
+library(gridExtra)
+library(ks)
+library(entropy)
+library(corrplot)
+options(device='quartz')
+```
+
+
+```{r loadData}
+setwd("~/Dropbox/02_RikenProj/fMRI_Data_R/MIData/")
+MIdata_s01 <- read.csv('s01_MI_5orient.csv')
+MIdata_s02 <- read.csv('s02_MI_5orient.csv')
+MIdata_s03 <- read.csv('s03_MI_5orient.csv')
+MIdata_s04 <- read.csv('s04_MI_5orient.csv')
+MIdata_s05 <- read.csv('s05_MI_5orient.csv')
+
+MIdata <- rbind(MIdata_s01,MIdata_s02,MIdata_s03,MIdata_s04,MIdata_s05)
+rm(list=c('MIdata_s01','MIdata_s02','MIdata_s03','MIdata_s04','MIdata_s05'))
+
+# rename s02 roi as same as others
+MIdata$ROIs <- as.factor(MIdata$ROIs)
+MIdata$reROIs <- revalue(MIdata$ROIs, c("arFFA"="rFFA", "prFFA"="rFFA"))
+
+```
+
+
+The filled bars represent the proportions of neurons in each class that are significantly tuned; that is, for which the mutual information (between neural activity and viewpoint) is higher than the 97.5th percentile of the null distribution. 
+Here, we consider shuffed MI values
+```{r PercentMI_indROIs}
+
+MIdatavox <- droplevels(ddply(MIdata, .(Subj, reROIs, voxel), summarise,
+                              VoxMIvalue = mean(MIvalue),
+                              VoxShuffed = mean(meanShuffed)))
+
+MIdataQuant <- droplevels(ddply(MIdatavox, .(Subj, reROIs), summarise,
+                                nvox=length(voxel),
+                                X975 = quantile(VoxShuffed, 0.85)))
+
+MIdatavoxQuant <- merge(MIdatavox,MIdataQuant)
+
+MIdataSelectvox <- droplevels(ddply(MIdatavoxQuant, .(Subj, reROIs, nvox), summarise,
+                                    SelVoxInd=voxel[VoxMIvalue>=X975]))
+                                     # get index of those voxel's MIvalue > quantile shuffedMI
+
+freqsMIPerROI <- droplevels(ddply(MIdataSelectvox, .(Subj, reROIs, nvox), summarise, 
+                                    freqVox=length(SelVoxInd)))
+
+percentMIPerROI <- droplevels(ddply(freqsMIPerROI, .(Subj, reROIs), transform, 
+                                       percentVox = freqVox/nvox*100))
+
+
+
+avgSubjMIPerROI <- droplevels(ddply(percentMIPerROI, .(reROIs), summarise,
+                                    N=length(Subj),
+                                    std=sd(percentVox),
+                                    se=std/sqrt(N),
+                                    avgpercentVox=mean(percentVox)))
+                                     
+
+# plot percentage of orients in a ROI
+dev.new()
+ggplot(percentMIPerROI, aes(x=reROIs, y=percentVox)) + 
+  facet_wrap(~Subj, scales='free') + 
+  geom_bar(stat="identity",colour="black")
+
+
+# plot percentage of orients in a ROI
+dev.new()
+ggplot(avgSubjMIPerROI, aes(x=reROIs, y=avgpercentVox)) + 
+  geom_errorbar(aes(ymin=avgpercentVox-se, ymax=avgpercentVox+se), width=0.1) +
+  geom_bar(stat="identity",colour="black")
+
+
+```
+
+
+Presenting BOLD response and MI and compare the ROIs
+```{r maxSigChVsMI}
+meanSigChOrientTruncate <- droplevels(subset(MIdata, (volume >= 2) & (volume <=10)))
+MIdataSigChvox <- droplevels(ddply(MIdata, .(Subj, reROIs, voxel, orient), summarise,
+                                   maxSig=max(zSigCh),
+                                   VoxMIvalue = mean(MIvalue),
+                                   VoxShuffed = mean(meanShuffed)))
+
+MIdataSigChvoxWcut <- merge(MIdataSigChvox, MIdataQuant)
+
+maxSigPerVoxCut <- ddply(MIdataSigChvoxWcut, .(Subj, reROIs, voxel), summarise,
+                      avgSig=mean(maxSig),
+                      VoxMIvalue=mean(VoxMIvalue),
+                      VoxShuffed=mean(VoxShuffed),
+                      cutX975=mean(X975))
+#maxSigPerVoxCut$cutX975 <- 0
+maxSigPerVox <- ddply(maxSigPerVoxCut, .(Subj, reROIs, voxel), summarise,
+                      SelVoxInd=voxel[VoxMIvalue>=cutX975],
+                      avgSig=avgSig[VoxMIvalue>=cutX975],
+                      avgMI=VoxMIvalue[VoxMIvalue>=cutX975])
+
+maxSigPerVox$mergLHRH <- revalue(maxSigPerVox$reROIs, c("rFFA"="FFA", "lFFA"="FFA","rOFA"="OFA","lOFA"="OFA"))                      
+
+maxSigPerVox.LH <- subset(maxSigPerVox, reROIs==c('lFFA','lOFA'))
+maxSigPerVox.RH <- subset(maxSigPerVox, reROIs==c('rFFA','rOFA'))
+
+maxSigPerVox.LH$reROIs <- factor(maxSigPerVox.LH$reROIs) # drop levels after subset
+maxSigPerVox.RH$reROIs <- factor(maxSigPerVox.RH$reROIs) # drop levels after subset
+
+# plot percentage of orients in a ROI
+# merge left and right ROIs
+dev.new()
+ggplot(maxSigPerVox, aes(x=avgMI, y=avgSig, colour=mergLHRH)) + 
+  facet_wrap(~Subj, scales='free') + 
+  geom_point()
+  #stat_summary(aes(group = mergLHRH), fun.y=mean, geom="point") 
+
+# all ROIs
+dev.new()
+ggplot(maxSigPerVox, aes(x=avgMI, y=avgSig, colour=reROIs)) + 
+  facet_wrap(~Subj, scales='free') + 
+  geom_point()
+
+# only Left 
+dev.new()
+ggplot(maxSigPerVox.LH, aes(x=avgMI, y=avgSig, colour=reROIs)) + 
+  facet_wrap(~Subj, scales='free') + 
+  geom_point()
+
+# only Right
+dev.new()
+ggplot(maxSigPerVox.RH, aes(x=avgMI, y=avgSig, colour=reROIs)) + 
+  facet_wrap(~Subj, scales='free') + 
+  geom_point()
+
+
+maxSigPerROI <- ddply(maxSigPerVox, .(Subj, reROIs), summarise,
+                      N=length(voxel),
+                      std=sd(avgSig),
+                      se=std/sqrt(N),
+                      avgMI=mean(avgSig))
+
+ 
+
+
+maxSigPerROI.RH <- subset(maxSigPerROI, reROIs==c('rFFA','rOFA'))
+maxSigPerROI.LH <- 
+
+#
+dev.new()
+ggplot(maxSigPerROI.RH, aes(x=reROIs, y=avgMI, fill=reROIs)) + 
+  facet_wrap(~Subj, scales='free') + 
+  geom_bar(fill="#DD8888", width=.8, stat="identity") +
+  geom_errorbar(aes(ymin=avgMI-se, ymax=avgMI+se), width=0.1) +
+  guides(fill=FALSE) +
+  xlab("face-selective areas") + ylab("Neural Responses") 
+
+
+
+
+```
+
+```{r plotDesityMIandBOLD}
+# plot density of MI and BOLD response of two rois
+
+OneSubjPlot <- droplevels(subset(maxSigPerVox.RH, Subj=="S05"))
+
+# placeholder plot - prints nothing at all
+empty <- ggplot() + geom_point(aes(1, 1), colour = "white") + theme(plot.background = element_blank(), 
+    panel.grid.major = element_blank(), panel.grid.minor = element_blank(), 
+    panel.border = element_blank(), panel.background = element_blank(), axis.title.x = element_blank(), 
+    axis.title.y = element_blank(), axis.text.x = element_blank(), axis.text.y = element_blank(), 
+    axis.ticks = element_blank())
+
+# scatterplot of x and y variables
+scatter <- ggplot(OneSubjPlot, aes(x=avgMI, y=avgSig)) + 
+  geom_point(aes(color = reROIs)) + 
+  scale_color_manual(values = c("orange", "purple")) + 
+  theme(legend.position = c(1, 1), legend.justification = c(1,1))
+
+# marginal density of x - plot on top
+plot_top <- ggplot(OneSubjPlot, aes(x=avgMI, fill = reROIs)) + 
+  geom_density(alpha = 0.5) + 
+  scale_fill_manual(values = c("orange", "purple")) + 
+  theme(legend.position = "none")
+
+# marginal density of y - plot on right
+plot_right <- ggplot(OneSubjPlot, aes(x=avgSig, fill = reROIs)) + 
+  geom_density(alpha = 0.5) + 
+  coord_flip() + 
+  scale_fill_manual(values = c("orange", "purple")) + 
+  theme(legend.position = "none")
+
+# arrange the plots together, with appropriate height and width for each row
+# and column
+grid.arrange(plot_top, empty, scatter, plot_right, ncol = 2, nrow = 2, widths = c(4,1), heights = c(1, 4))
+
+
+```
+
+
+Bootstrap T-test between two MI values of reROIs
+```{r Bootstrap}
+library(boot)
+
+diff_boot = function(d1,i){
+  #browser()
+  d = d1
+  d$reROIs <- d$reROIs[i] # randomly re-assign groups
+  Mean = tapply(d$avgMI, d$reROIs, mean)
+  Diff = Mean[1]-Mean[2]
+  Diff
+}
+
+
+diff_sigCh = function(d1,i){
+  #browser()
+  d = d1
+  d$reROIs <- d$reROIs[i] # randomly re-assign groups
+  Mean = tapply(d$avgSig, d$reROIs, mean)
+  Diff = Mean[1]-Mean[2]
+  Diff
+}
+
+
+
+# individual Subj bootsrap test
+IDs=unique(maxSigPerVox.RH$Subj)
+for (j in seq(1, length(IDs))){
+  
+  OneSubjMI <- subset(maxSigPerVox.RH, Subj==IDs[j])
+  OneSubjMI$Subj <- factor(OneSubjMI$Subj) # drop levels after subset
+  Boot_result = boot(data=OneSubjMI, statistic = diff_boot, R =1000)
+  p_value<- mean(abs(Boot_result$t) > abs(Boot_result$t0)) # p value
+  print(c(j, p_value))
+  #quantile(Boot_result$t, c(.025, .975))
+  #Boot_result$t0
+}
+
+
+# Across all subjects
+Boot_result = boot(data = maxSigPerVox.LH, statistic = diff_sigCh, R =10000)
+  p_value_acrSubj <- mean(abs(Boot_result$t) > abs(Boot_result$t0)) # p value
+  p_value_acrSubj
+  #hist(Boot_result$t)
+  #plot(density(Boot_result$t))
+  #quantile(Boot_result$t, c(.025, .975))
+
+
+# for merge left and right sides
+diff_mergeboot = function(d1,i){
+  #browser()
+  d = d1
+  d$mergLHRH <- d$mergLHRH[i] # randomly re-assign groups
+  Mean = tapply(d$avgMI, d$mergLHRH, mean)
+  Diff = Mean[1]-Mean[2]
+  Diff
+}
+
+mergeB_result = boot(data = maxSigPerVox, statistic = diff_mergeboot, R =10000)
+  p_value_merge <- mean(abs(mergeB_result$t) > abs(mergeB_result$t0)) # p value
+  p_value_merge
+
+
+
+
+```
+
+f <- function() {
+   A <- sample(maxSigPerVox$avgMI, nrow(maxSigPerVox$reROIs), replace=T) 
+   B <- sample(maxSigPerVox$avgMI, nrow(maxSigPerVox), replace=T)
+   mean(A)-mean(B)
+}
+
+kk <- (replicate(1000, f()))
+hist(kk)
+quantile(kk, c(.025, .975))
+plot(density(kk))
+
+
+```
+
+
+
+
+
+
+
+
+
+Kullback-Leibler divergence (information divergence)
+non-symmetric measure of the difference between two probability distributions P and Q
+$$
+DKL(\P||\Q) = \Sigma{i}\P(\i)\log_2/P(\i)/Q(\i)
+$$
+
+
+
+Calculate KL (not consider shuffed MI)
+```{r KL_divergence}
+
+orKL_fun <- function(voxelDat){ 
+  #browser()
+  tempVox <- voxelDat
+  or1 <- droplevels(subset(tempVox, orient==1))
+  or2 <- droplevels(subset(tempVox, orient==2))
+  or3 <- droplevels(subset(tempVox, orient==3))
+  or4 <- droplevels(subset(tempVox, orient==4))
+  or5 <- droplevels(subset(tempVox, orient==5))
+  
+  kdeOr1 <- kde(or1$zSigCh)
+  kdeOr2 <- kde(or2$zSigCh)
+  kdeOr3 <- kde(or3$zSigCh)
+  kdeOr4 <- kde(or4$zSigCh)
+  kdeOr5 <- kde(or5$zSigCh)
+  
+  or11_KL <- KL.empirical(kdeOr1$estimate, kdeOr1$estimate, unit="log2")
+  or12_KL <- KL.empirical(kdeOr1$estimate, kdeOr2$estimate, unit="log2")
+  or13_KL <- KL.empirical(kdeOr1$estimate, kdeOr3$estimate, unit="log2")
+  or14_KL <- KL.empirical(kdeOr1$estimate, kdeOr4$estimate, unit="log2")
+  or15_KL <- KL.empirical(kdeOr1$estimate, kdeOr5$estimate, unit="log2")
+  or1_allKL <- c(or11_KL,or12_KL,or13_KL,or14_KL,or15_KL)
+  
+  or22_KL <- KL.empirical(kdeOr2$estimate, kdeOr2$estimate, unit="log2")
+  or23_KL <- KL.empirical(kdeOr2$estimate, kdeOr3$estimate, unit="log2")
+  or24_KL <- KL.empirical(kdeOr2$estimate, kdeOr4$estimate, unit="log2")
+  or25_KL <- KL.empirical(kdeOr2$estimate, kdeOr5$estimate, unit="log2")
+  or2_allKL <- c(or12_KL,or22_KL,or23_KL,or24_KL,or25_KL)
+  
+  or33_KL <- KL.empirical(kdeOr3$estimate, kdeOr3$estimate, unit="log2")
+  or34_KL <- KL.empirical(kdeOr3$estimate, kdeOr4$estimate, unit="log2")
+  or35_KL <- KL.empirical(kdeOr3$estimate, kdeOr5$estimate, unit="log2")
+  or3_allKL <- c(or13_KL,or23_KL, or33_KL,or34_KL,or35_KL)
+  
+  or44_KL <- KL.empirical(kdeOr4$estimate, kdeOr4$estimate, unit="log2")
+  or45_KL <- KL.empirical(kdeOr4$estimate, kdeOr5$estimate, unit="log2")
+  or4_allKL <- c(or14_KL,or24_KL,or34_KL, or44_KL,or45_KL)
+  
+  or55_KL <- KL.empirical(kdeOr5$estimate, kdeOr5$estimate, unit="log2")
+  or5_allKL <- c(or15_KL,or25_KL,or35_KL, or45_KL, or55_KL)
+  
+  OrKL_all <- rbind(or1_allKL,or2_allKL,or3_allKL,or4_allKL,or5_allKL)
+  colnames(OrKL_all) <- c("orL90", "orL45","Front","orR45","orR90")
+  rownames(OrKL_all) <- c("orL90", "orL45","Front","orR45","orR90")
+  return(OrKL_all)  
+  }
+
+# find the best MI voxels in each roi
+cutMIcrit=c(0, 0.25, 0.5, 0.75)
+MIpercentil <- droplevels(ddply(MIdata, .(Subj, reROIs), summarise,
+                                Xcut = quantile(MIvalue, cutMIcrit[4])))
+
+MIdata.MIpercentil <- merge(MIdata, MIpercentil)
+MIdataBestMIVox <- droplevels(subset(MIdata.MIpercentil, MIvalue>=Xcut)) # select those voxels > critical
+
+MI_KLdata <- ddply(MIdataBestMIVox, .(Subj, reROIs, voxel), 
+                   .fun=function(voxelDat) orKL_fun(voxelDat))
+
+# add one column as orientation index
+MI_KLdata$orIndex <- rep(seq(1,5), nrow(MI_KLdata)/5)
+
+# avg all voxels in a roi
+avgKLdata <- ddply(MI_KLdata, .(Subj, reROIs, orIndex), summarise,
+                      mean_orL90 = mean(orL90),
+                      mean_orL45 = mean(orL45),
+                      mean_orFront = mean(Front),
+                      mean_orR45 = mean(orR45),
+                      mean_orR90 = mean(orR90))
+
+
+# plot KL of avg voxels in reROIs
+j=0
+for (i in seq(1,nrow(avgKLdata),5)){
+  j=j+1
+  ROIname <- unique(avgKLdata$reROIs)
+  avgKL.matrix <- as.matrix(avgKLdata[c(4:8)])
+  avgKLROI.matrix <- avgKL.matrix[i:(i+4),1:5]
+  dev.new() 
+  orTitle=ROIname[j]
+  corrplot(avgKLROI.matrix,title=orTitle, cl.lim=c(0,max(avgKLdata[c(4:8)])+0.05), method="circle", 
+           is.corr=FALSE, type="full", addCoef.col="black",
+           addshade="positive", addgrid.col="gray", mar=c(0,0,1,0), diag= FALSE) 
+  }
+
+```
+
+
+
+
+
+
+corrplot(tempMergeOrKL, method="shade", shade.col=NA, tl.col="black",tl.srt=45, addshade="positive")
+
+
+dev.new() 
+orTitle="lFFA"
+corrplot(OrKL_all,title=orTitle, cl.lim=c(0,1), method="color", is.corr=FALSE, type="full",
+addshade="positive", addgrid.col="gray", mar=c(0,0,1,0), diag= FALSE) 
+
+

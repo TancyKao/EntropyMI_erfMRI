@@ -1,0 +1,432 @@
+title: "Understanding entropy and mutual information applied to the face orientation tuning"
+author: "Tancy"
+date: "5 February 2015"
+output: html_document
+---
+---
+
+```{r loadLibary}
+rm(list=ls())
+library(plyr)
+library(entropy)
+library(ggplot2)
+library(ggthemes)
+library(reshape2)
+library(gridExtra)
+library(ks)
+library(plot3D)
+#options(device='quartz')
+
+setwd("~/Dropbox/02_RikenProj/fMRI_Data_R/")
+SigCh_OrientData <- read.csv('SigCh_OrientData.csv')
+
+```
+
+
+1st step: z normalized of the timeseies from individual voxel
+```{r z_normalizeForSig}
+RandomVox <- droplevels(subset(SigCh_OrientData, Subj=='S02'& orient!=7 & orient!=6 & ROIs!='rOTA' & ROIs!='lOTA'))
+                              #& volume >= 1 & volume <=15
+                              #& voxel %in% c(1,2,3, 7,8,25,45) )) # get 3 voxels info, remove blank baseline #,7,8,25,45
+#head(RandomVox)
+RandomVox_Zdata <- droplevels(ddply(RandomVox, .(voxel), transform,
+                         zSigCh = scale(SignalChange)))
+#hist(RandomVox_Zdata$zSigCh) # plot histogram
+
+# writeCSVname
+savefile <- "s02_MI_5orient.csv"
+```
+
+```{r z_normalizeForBeta}
+# RandomVox <- droplevels(subset(Beta_OrientData, Subj=='S02'& ROIs=='rOFA' & orient!=7 & orient!=6 & volume >= 1 & volume <=20))
+#                               #& voxel %in% c(1,2,3, 7,8,25,45) )) # get 3 voxels info, remove blank baseline #,7,8,25,45
+# #head(RandomVox)
+# RandomVox_Zdata <- ddply(RandomVox, .(voxel), transform,  # get z normalized within a voxel across all selected orientations
+#                               zSigCh = scale(Hdr))
+# #hist(RandomVox_Zdata$zSigCh) # plot histogram
+# 
+# # writeCSVname
+# #savefile <- "s01rFFA_MI_5orient.csv"
+```
+
+
+
+2nd step: plot hrf of each voxel
+```{r plot_hrfperVox, echo=FALSE}
+  dev.new()
+  ggplot(RandomVox_Zdata, aes(x=volume, y=zSigCh, colour = as.factor(orient))) +
+  theme_few() + 
+  facet_wrap(~voxel, scales="free_y", nrow=6) + 
+  scale_color_brewer(palette='Paired',name="orient",
+                       breaks=c("1", "2", "3","4","5","6"),
+                       labels=c("L90","L45","Front","R45","R90","180")) + 
+  #geom_errorbar(aes(ymin=meanSigCh-se, ymax=meanSigCh+se), width=0.1) +
+  geom_point(size=3) +
+  geom_line(size=1)
+  
+```
+
+# kernel density distribution of ROI
+```{r BOLD_denisty}
+
+#kdeball <- kde(RandomVox_Zdata$zSigCh)$h # use kde to get bin width
+
+kde_rangeSig <- ddply(RandomVox_Zdata, .(Subj, ROIs), function(dat){
+  #print(df$zSigCh)
+  #browser()
+  rangeSig <- range(dat$zSigCh)
+  kk <- kde(dat$zSigCh)$h
+  kdeseg <- ceiling(diff(rangeSig)/kk)
+  kde_rangeSig <- c(kdeseg,rangeSig)
+  
+})
+colnames(kde_rangeSig) <- c("Subj", "ROIs","kdebins","minRange","maxRange")
+RandomVox_Zdata_bins <- merge(RandomVox_Zdata,kde_rangeSig)
+# reorder the seq
+RandomVox_Zdata_bins <- RandomVox_Zdata_bins[ order(RandomVox_Zdata_bins$Subj, RandomVox_Zdata_bins$ROIs, 
+                                                    RandomVox_Zdata_bins$voxel, RandomVox_Zdata_bins$orient, 
+                                                    RandomVox_Zdata_bins$volume),]
+```
+
+## Definition of entropy
+Entropy was a measure introduced by Claude Shannon (1948,"A Mathematical Theory of Communication") to measure the amount of uncertainty in a signal. 
+
+The entropy $H$ is defined as: 
+$$
+H(X)=-\sum\limits_{x=1}^np(x)\log_2p(x)
+$$
+$X$ is a discrete random variable and $f(x)$ is the value of its probability distribution at $x$
+Because of $log_2$ entropy is measured in bits. 
+
+Entropy in BOLD responses
+$$
+H(B)=-\sum\limits_{b\in B}p(b)\log_2p(b)
+$$
+
+$B$ is the range of BOLD response within a ROI, depends how many bins we defined
+Here we caculated the Entroy of BOLD respnse ($H(B)$) of one voxel with 6 orientations (-90, -45, 0, 45, 90, 180)
+## need to figure out whether to add 180 (back side of face) ##
+
+3rd step: entropy of the ALL BOLD responses in each voxel
+3.1 discretizing the continuous BOLD response into dscrete variable $B$ by dividing the range of responses into a set of equidistant bins $b$  nBins range is based on all voxels within a ROI
+3.2 entropy of the BOLD responses in each voxel 4rd step: entropy of the each orientations of a voxel
+
+```{r H(B)_perVox}
+
+computeVox_entropy <- function(Sig, kdebins, minRange, maxRange, MImethod="ML"){
+  #browser()
+  #BOLD_discreted <- discretize(Sig, numBins=numBins,r=ROI_range)
+  BOLD_discreted <- discretize(Sig, numBins=kdebins[1],r=c(minRange[1], maxRange[1]))
+  
+  HB_perVox <- entropy::entropy(BOLD_discreted, unit="log2", method = MImethod)
+  return(HB_perVox)
+  }
+
+# H(B)
+HB <- ddply(RandomVox_Zdata_bins, .(Subj, ROIs, voxel), summarise, HB_perVox=computeVox_entropy(Sig=zSigCh,kdebins=kdebins,minRange=minRange,maxRange=maxRange, MImethod="ML"))  
+
+#fnEntropy <- function(x) computeVox_entropy(x, kdebins, minRange, maxRange)
+#HB <- ddply(RandomVox_Zdata_bins, .(Subj, ROIs, voxel), summarise, HB_perVox=fnEntropy(c(zSigCh,kdebins,minRange, maxRange))) # get entropys of per voxels
+# H(B|theta_i)
+HBtheta_i <- ddply(RandomVox_Zdata_bins, .(Subj, ROIs, voxel, orient), summarise, HB_perOrientVox=computeVox_entropy(Sig=zSigCh,kdebins=kdebins,minRange=minRange,maxRange=maxRange, MImethod="ML"))   # get entropys of per orient in a voxel
+
+# H(B|theta)
+
+HBtheta <- ddply(HBtheta_i, .(Subj, ROIs, voxel), summarise,
+                 meanHBtheta = mean(HB_perOrientVox))
+
+
+# MI = H(B)-H(B|theta)
+
+MI_table <- merge(HB, HBtheta, by=c("Subj","ROIs","voxel"))
+
+MI_table$MIvalue <- NA
+MI_table$MIvalue <- MI_table$HB_perVox - MI_table$meanHBtheta
+
+```
+
+
+Bias_correct with bootstrapping 
+```{r BiasAdj}
+
+shuffled_MI <- function(voxelDat) {
+  #browser()
+  voxelShuffled <- voxelDat
+  voxelShuffled$orient <- sample(voxelShuffled$orient)
+  voxelShuffled$volume <- sample(voxelShuffled$volume)
+  #HBtheta_i_Shuffled <- ddply(voxelShuffled, .(Subj, ROIs, voxel, orient), 
+  #                            summarise, HB_theta_Shuffled=fnEntropy(zSigCh))
+  HBtheta_i_Shuffled <- ddply(voxelShuffled, .(Subj, ROIs, voxel, orient), summarise,
+                              HB_theta_Shuffled=computeVox_entropy(Sig=zSigCh,kdebins=kdebins,minRange=minRange,maxRange=maxRange, MImethod="ML"))
+  
+  HB_Shuffled <- ddply(voxelShuffled, .(Subj, ROIs, voxel), summarise, 
+                       HB_Shuffled_perVox=computeVox_entropy(Sig=zSigCh,kdebins=kdebins,minRange=minRange,maxRange=maxRange, MImethod="ML"))
+  
+  #shuf_HB <- computeVox_entropy(voxelShuffled$zSigCh, numBins=numBins, ROI_range = ROI_range)
+  meanHBtheta_i_Shuffled <- ddply(HBtheta_i_Shuffled, .(Subj, ROIs, voxel), summarise,
+                                  meanHBthetaShuffled=mean(HB_theta_Shuffled))
+  
+  Shuffled_all <- merge(HB_Shuffled, meanHBtheta_i_Shuffled, by=c("Subj","ROIs","voxel"))
+  
+  #Shuf_MI <- HB_Shuffled-sum(HBtheta_i_Shuffled$HB_Shuffled_perOrientVox*(1/k)) # We multiply by probability of each orientation (1/k)
+  ShuffMI_table <- Shuffled_all$HB_Shuffled_perVox - Shuffled_all$meanHBthetaShuffled
+  
+  return(ShuffMI_table)
+  }
+
+Shuffed_MI_VoxData <- replicate(5000, ddply(RandomVox_Zdata_bins, .(Subj, ROIs, voxel), 
+                                         .fun=function(voxelDat) shuffled_MI(voxelDat)), simplify=FALSE)
+
+# list to dataframe
+Shuffed_MI_bindVoxData <- do.call(rbind, Shuffed_MI_VoxData) # bind by row
+save(Shuffed_MI_bindVoxData, file="s02_MI_5orient_5000permuted.RData")
+
+#hist(Shuffed_MI_bindVoxData$V1)
+meanShuffed_MI<- ddply(Shuffed_MI_bindVoxData, .(Subj, ROIs, voxel), summarise,
+                       meanShuffed = mean(V1))
+#criticalBound <- quantile(meanShuffed_MI$meanShuffed, c(.025, .975))
+
+```
+
+Export MI to CSV file
+```{r saveMI2rawdata}
+
+# merge all MI info
+RandomVox_Zdata_MI <- merge(RandomVox_Zdata_bins,MI_table)
+
+RandomVox_Zdata_MI_Bias <- merge(RandomVox_Zdata_MI, meanShuffed_MI)
+
+write.csv(RandomVox_Zdata_MI_Bias, file=savefile, row.names=FALSE)
+
+```
+
+
+
+```
+
+# shuffled_MIpluginfn <- function(voxelDat) shuffled_MI(voxelDat, k=5, numBins=kdeBins)
+# 
+# # shufData <- ddply(RandomVox_Zdata, .(Subj, ROIs, voxel), 
+# #                   .fun=function(voxelDat) shuffled_MI(voxelDat, k=5, numBins=kdeBins)) # get entropys of per voxels
+# 
+# Shuffed_MI_VoxData <- replicate(1, ddply(RandomVox_Zdata, .(voxel), 
+#                   .fun=function(voxelDat) shuffled_MIpluginfn), simplify=FALSE)
+# 
+# ddply(RandomVox_Zdata, .(voxel), .fun=function(voxelDat) shuffled_MIpluginfn)
+
+
+#shufData <- ddply(RandomVox_Zdata, .(voxel), summarise, shuf_MIorient=shuffled_MI(oneVoxelDat, k=5, numBins=kdebins)) # get entropys of per voxels
+
+
+# shufData <- ddply(RandomVox_Zdata, .(voxel), .fun=function(dat) print(dat)) # get entropys of per voxels
+
+
+# bootstrapping 1000 times
+
+#kk <- (replicate(1000, shuffled_MI()))
+#shufBiasMI <- mean(kk)
+
+#plot(density(kk))
+
+```
+
+
+Plot hrf of each voxel and sort by MI value
+```{r plotMIinROI}
+
+meanMIvalues <- rep(MI_table$MIvalue, each =(nrow(RandomVox_Zdata)/length(unique(RandomVox_Zdata$voxel))))
+RandomVox_ZdataMI <- cbind(RandomVox_Zdata,meanMIvalues)
+RandomVox_ZdataMI$voxel <- as.factor(RandomVox_ZdataMI$voxel)
+
+RandomVox_ZdataMI$voxel <- reorder(RandomVox_ZdataMI$voxel, -RandomVox_ZdataMI$meanMIvalues) # order voxel by MI values
+
+miLabels <- ddply(RandomVox_ZdataMI, .(voxel), summarise, mi=mean(meanMIvalues)) # get mi label for each voxel
+  dev.new()
+  ggplot(data=RandomVox_ZdataMI, aes(x=volume, y=zSigCh)) +
+  theme_few() + 
+  facet_wrap(~voxel, scales="fixed", nrow=6) + 
+  scale_color_brewer(palette='Paired',name="orient",
+                       breaks=c("1", "2", "3","4","5"),
+                       labels=c("L90","L45","Front","R45","R90")) + 
+  #geom_errorbar(aes(ymin=meanSigCh-se, ymax=meanSigCh+se), width=0.1) +
+  geom_point(aes(colour = as.factor(orient)), size=2) +
+  geom_line(aes(colour = as.factor(orient)), size=0.5)  +
+  geom_text(data=miLabels, aes(x=20, y=1.5, label=paste(round(mi,2)), group=voxel), size=3)
+
+```
+
+
+```{r plotHighLowMI}
+SortMI<- MI_table[with(MI_table, order(-MIvalue,voxel)),] # sort voxel based on MI value from high to low
+HighMIvoxel <- SortMI$voxel[1:1] # get highest MI voxels
+LowMIvoxel <- SortMI$voxel[(NROW(SortMI)-1+1):NROW(SortMI)] # get lowest MI voxels
+HighMIVox <- droplevels(subset(RandomVox_Zdata, voxel %in% c(HighMIvoxel)))
+LowMIVox <- droplevels(subset(RandomVox_Zdata, voxel %in% c(LowMIvoxel)))
+
+  dev.new()
+  ghighMI <- ggplot(HighMIVox, aes(x=volume, y=zSigCh, colour = as.factor(orient))) +
+  theme_few() + 
+  facet_wrap(~voxel, scales="free_y", nrow=6) + 
+  scale_color_brewer(palette='Paired',name="orient",
+                       breaks=c("1", "2", "3","4","5"),
+                       labels=c("L90","L45","Front","R45","R90")) + 
+  #geom_errorbar(aes(ymin=meanSigCh-se, ymax=meanSigCh+se), width=0.1) +
+  geom_point(size=3) +
+  geom_line(size=1) 
+
+  glowMI <- ggplot(LowMIVox, aes(x=volume, y=zSigCh, colour = as.factor(orient))) +
+  theme_few() + 
+  facet_wrap(~voxel, scales="free_y", nrow=6) + 
+  scale_color_brewer(palette='Paired',name="orient",
+                       breaks=c("1", "2", "3","4","5"),
+                       labels=c("L90","L45","Front","R45","R90")) + 
+  #geom_errorbar(aes(ymin=meanSigCh-se, ymax=meanSigCh+se), width=0.1) +
+  geom_point(size=3) +
+  geom_line(size=1)
+  grid.arrange(ghighMI, glowMI, nrow=1)
+
+
+```
+
+
+```{r plotDensity}
+vox1 <- subset(RandomVox_Zdata, voxel==****) 
+
+vox1$orient <- as.factor(vox1$orient)
+
+ggplot(vox1, aes(x=zSigCh)) + 
+    stat_density()
+
+
+dev.new() 
+
+#Density distribution of a voxel (merge all orients)
+g1 <- ggplot(vox1, aes(x=zSigCh)) + 
+    theme_few() +
+    scale_color_brewer(palette='Set2') + 
+    stat_density(aes(group=orient, color=orient, y=0.2*..scaled..), fill=NA, position='identity',bins=kdebins, size=1) + 
+    stat_density(fill='grey20', color=NA, size=2, alpha=0.5)
+
+#Density distribution of each orient in a voxel
+g2 <- ggplot(vox1, aes(x=zSigCh)) + 
+facet_wrap(~orient) + 
+ theme_few() + 
+ scale_color_brewer(palette='Set2') + 
+ stat_density(aes(group=orient, color=orient), fill=NA, position='identity', bins=kdebins, size=1) + 
+ stat_density(fill='grey80', color=NA, size=2, alpha=0.5)
+
+#BOLD response of each orient in a voxel
+g3 <- ggplot(vox1, aes(x=volume, y=zSigCh))  +
+ theme_few() + 
+ scale_color_brewer(palette='Set2') + 
+ geom_line(aes(color=orient)) + 
+ geom_line(stat='summary', fun.y='mean', size=1, alpha=0.5)
+
+grid.arrange(g1, g2, g3, nrow=1)
+
+```
+
+
+
+need to do surface, or prediction surface
+```{r plot3DScatterMI}
+#MIcolvar  <-  color.scale(MI_table$MIvalue,c(0,1,1),c(1,1,0),c(0,1,0))
+c=cut(MI_table$MIvalue, breaks=128)
+MIcolvar  <-  heat.colors(60)[as.numeric(c)]
+open3d()
+clear3d("all")
+bg3d(color="#887777")
+light3d()
+plot3d(MI_table$x,MI_table$y, MI_table$z, type='s',col=MIcolvar, size=1, lit=FALSE)
+
+# Fit a plane to the data
+fit <- lm( MI_table$z~MI_table$x + MI_table$y)
+coefs <- coef(fit)
+a <- coefs['MI_table$x']
+b <- coefs['MI_table$y']
+c <- -1
+d <- coefs['(Intercept)']
+planes3d(a, b, c, d, alpha=0.2)
+
+
+#scatter3D(MI_table$x,MI_table$y, MI_table$z, colvar=MI_table$MIvalue )
+
+
+```
+
+
+
+# HBScramble <- NaN
+# for (temp in 1:3){
+# # H(B)_scramble
+#  browser()
+#  
+#  #fn <- function(x) computeVox_entropy(x)
+#  HBScramble[temp] <- ddply(RandomVox_Zdata, .(voxel), summarise, HB_perVox=computeVox_entropy(sample(zSigCh)))
+#                              
+#  ddply(RandomVox_Zdata, .(voxel), summarise, print(computeVox_entropy(sample(zSigCh))))
+#   
+#  # H(B|theta_i)_scramble
+#  #HBScramble_theta_i(temp) <- ddply(RandomVox_Zdata, .(voxel, orient), summarise, HB_perOrientVox=fn(sample#(zSigCh)))
+#   
+# }
+
+
+```
+
+###############
+The definition of Mutual information
+$$ 
+H(X;Y) = -\sum\limits_{x\in X}\sum\limits_{y\in Y}p(x,y)\log_2p(x,y)/p(x)p(y)
+H(X;Y) = H(X) - H(X|Y)
+= H(Y) - H(Y|X)
+= H(X) + H(Y) - H(X,Y)
+$$
+
+$H(X), H(Y)$ is marginal entropy of X,Y; $H(X|Y)$ is conditional entropy of X given Y; $H(X,Y)$ is joint entroy of X and Y
+
+Mutual information in BOLD responses
+$$
+H(B;\Theta) = H(B) - H(B|\Theta)
+= H(B) + H(\Theta) - H(B,\Theta)
+$$
+$\Theta$ is the indvidual orientation that we presented
+
+The definition of conditional entropy
+$$
+H(Y|X) = -\sum\limits_{x\in X}p(x) H(Y|X = x)
+= -\sum\limits_{x\in X}p(x)\sum\limits_{y\in Y}p(y|x)\log_2p(y|x)
+= -\sum\limits_{x\in X}\sum\limits_{y\in Y}p(x,y)\log_2p(y|x)
+$$
+
+Conditonal Entropy of orientations in BOLD responses
+$$
+H(B|\Theta) = -\sum\limits_{\theta\in \Theta}p(\theta)\sum\limits_{b\in B}p(b|\theta)\log_2p(b|\theta)
+= -\sum\limits_{b\in B}\sum\limits_{\theta\in \Theta}p(\theta,b)\log_2p(b|\theta)
+$$
+$\Theta$ is the indvidual orientation that we presented, computed condtional entropy $p(b|\theta)$, which measure the resp uncertainty given knowlegde of the stimulus orientation
+
+
+Since the experimental evaluation of these probabilities is made from a limited number of experimental observa- tions, the resulting information measures suffer from a limited sampling bias (Panzeri et al., 2007). 
+Scrambling BOLD response and do bootstrapping
+
+#############################
+
+
+
+
+
+
+
+
+Reference
+http://info-theory.blogspot.jp/2005/01/understanding-mutual-information.html
+Gomez-Verdejjo(2012) Analysis of fMRI time series with mutual information 
+http://thirdorderscientist.org/homoclinic-orbit/2013/8/25/all-i-really-need-for-data-analysis-i-learned-in-kindergarten-mdash-venn-shannon-and-independence
+
+# to define the bin sizes
+Legg(2007)Improving accurary and efficiency of registration by mutual information using Sturges' histogram rule
+
+# to adjust bias
+Panzeri S, Senatore R, Montemurro MA, Petersen RS ()
+

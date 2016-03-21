@@ -1,0 +1,43 @@
+---
+title: ""
+author: "Arman Abrahamyan"
+date: "3 February 2015"
+output: html_document
+---
+
+Understanding entropy and mutual information
+
+## Definition of entropy
+Entropy was a measure introduced by Claude Shannon to measure the amount of uncertainty in a signal. The entropy $H$ is defined as: 
+$$
+H=-\sum\limits_{i=1}^n p_i\log_2(p_i)
+$$
+
+Because of $log_2$ entropy is measured in bits. 
+
+## What does entropy mean
+To intuit entropy, we can take a particular situation which is probailistic and therefore contains uncertainty and look at how entropy can describe such a process. We will take an example of throughing a coin and seeing how entropy can be calculated for such a case and how entropy changes as a function of coin fairness. 
+
+Let's imagine our coin is a fair coin and both tails and heads land with 0.5 probability. We have two possibilities tails and heads. Entropy is computed over probabilsities of possibilities. A fair coin has two possibilities, which are heads and tails, and each possibility will come up with 0.5 probability. Therefore, the entropy of our fair coin in that case will be $-[0.5\log_2(0.5) + (1-0.5)\log_2((1-0.5))]=$ `r -(0.5*log2(0.5) + (1-0.5)*log2((1-0.5)))`. This is the higest value of entropy when we have only two outcomes or two possibilities. 
+
+We can now ask what happens to entropy values when the coin is not fair. For example, it lends 60% of times as tails and 40% of times as heads. In this case entropy will be $H=-[0.6\log_2(0.6) + (1-0.6)\log_2((1-0.6))]=$ `r round(-(0.6*log2(0.6) + (1-0.6)*log2((1-0.6))), digits=3)`. The value of entropy gets smaller as we have possibilities which grow away from chance. Indeed, let's have a look what happens when the coin has possibliy of lending 80% on tails and 20% on heads. The entropy for such as coin will be $H=-[0.8\log_2(0.8) + (1-0.8)\log_2((1-0.8))]=$ `r round(-(0.8*log2(0.8) + (1-0.8)*log2((1-0.8))), digits=3)` bits. What this means is that we are more and more certain about what is going to happen when we through the coin in the air. There is a higher chance for it to lend on tails, which means less uncertainty about the outcome of the coil flip compared to when the chance on landing on heads or tails was 50%. Indeed, if we make our coin even more unfair so that it lends 95% of the time as tails and 5% of the time as head, we find that entropy goes down to $H=$ `r round(-(0.95*log2(0.95) + (1-0.95)*log2((1-0.95))), digits=3)` bits. 
+
+We can plot the entropy for two possible outcomes by computing it over a space of probability $p$. That is, we will change $p$ of a coin to land as tails to range from 0 to 1 while the probability of a coin to lend as heads will be (1-p). 
+
+```{r}
+library(ggplot2)
+p  <- seq(0.001, 0.999, 0.001) # Probability of a coin lending as tails
+H <- -(p*log2(p)+(1-p)*log2((1-p)))  # Compute entropy for two possible outcomes 
+qplot(p, H, geom='line')
+
+```
+
+
+Note that entropy is not defined for $p=0$ because $\log_2(0)$ is undefined. 
+
+We can see that the highest entropy is when all possibilities are closest to their most volatile state when making any kind of prediction is difficult. In the case of two possiblities, if the probability of landing on heads and tails is 50%, we have a great difficulty knowing which way the coin will lend. But as soon as the coin becomes just even slightly unfair, we can reduce our uncertainty. 
+
+So now let's compute what is the maximum entropy when there are three or four possibilities. That is, we want to know tha entropy when possibilities are at their chance level. 
+
+In the case of three possibilities, the chance level for each possibility is 1/3. Therefore, the maximum entropy in this case is $H=-[\frac{1}{3}\log_2\frac{1}{3} + \frac{1}{3}\log_2\frac{1}{3} + \frac{1}{3}\log_2\frac{1}{3}]=$ `r round(-(1/3*log2(1/3) + 1/3*log2(1/3) + 1/3*log2(1/3)), digits=3)` bits. In the case of 4 possibilities the chance level is $\frac{1}{4}$ or 0.25 and $H=-[\frac{1}{4}\log_2\frac{1}{4} + \frac{1}{4}\log_2\frac{1}{4} + \frac{1}{4}\log_2\frac{1}{4} + \frac{1}{4}\log_2\frac{1}{4}]=$ `r round(-(1/4*log2(1/4) + 1/4*log2(1/4) + 1/4*log2(1/4) + 1/4*log2(1/4)), digits=3)`
+
