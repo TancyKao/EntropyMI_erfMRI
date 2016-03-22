@@ -1,5 +1,7 @@
 ---
 title: "erfMRI_plotData"
+author: "TancyKao"
+date: "20150510"
 output: html_document
 ---
 
@@ -15,8 +17,8 @@ library(reshape)
 options(device='quartz')
 # recall data
 
-setwd("~/Dropbox/02_RikenProj/fMRI_Data_R/")
-SigCh_IdeData <- read.csv('SigCh_OrientData.csv')
+#setwd("~/Dropbox/02_RikenProj/fMRI_Data_R/")
+allData <- read.csv('/Users/tancy/Dropbox/fMRIData_R/fMRI_ERData_R/SigCh_OrientData.csv')
 
 ```
 

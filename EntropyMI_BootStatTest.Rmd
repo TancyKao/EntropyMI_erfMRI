@@ -1,7 +1,10 @@
 ---
-title: "EntropyMI_StatTest"
+title: "calculate mutual information of each interested region and bootstrapping analysis"
+author: "TancyKao"
+date: "20150225"
 output: html_document
 ---
+
 
 ```{r loadLibary}
 rm(list=ls())
@@ -17,12 +20,12 @@ options(device='quartz')
 
 
 ```{r loadData}
-setwd("~/Dropbox/02_RikenProj/fMRI_Data_R/MIData/")
-MIdata_s01 <- read.csv('s01_MI_5orient.csv')
-MIdata_s02 <- read.csv('s02_MI_5orient.csv')
-MIdata_s03 <- read.csv('s03_MI_5orient.csv')
-MIdata_s04 <- read.csv('s04_MI_5orient.csv')
-MIdata_s05 <- read.csv('s05_MI_5orient.csv')
+#setwd("Users/tancy/Dropbox/fMRI_Data_R/fMRI_ERData_R/")
+MIdata_s01 <- read.csv('/Users/tancy/Dropbox/fMRIData_R/fMRI_ERData_R/MIData/s01_MI_5orient.csv')
+MIdata_s02 <- read.csv('/Users/tancy/Dropbox/fMRIData_R/fMRI_ERData_R/MIData/s02_MI_5orient.csv')
+MIdata_s03 <- read.csv('/Users/tancy/Dropbox/fMRIData_R/fMRI_ERData_R/MIData/s03_MI_5orient.csv')
+MIdata_s04 <- read.csv('/Users/tancy/Dropbox/fMRIData_R/fMRI_ERData_R/MIData/s04_MI_5orient.csv')
+MIdata_s05 <- read.csv('/Users/tancy/Dropbox/fMRIData_R/fMRI_ERData_R/MIData/s05_MI_5orient.csv')
 
 MIdata <- rbind(MIdata_s01,MIdata_s02,MIdata_s03,MIdata_s04,MIdata_s05)
 rm(list=c('MIdata_s01','MIdata_s02','MIdata_s03','MIdata_s04','MIdata_s05'))
@@ -272,6 +275,11 @@ mergeB_result = boot(data = maxSigPerVox, statistic = diff_mergeboot, R =10000)
 
 ```
 
+
+***** NO RUN *****
+
+
+
 f <- function() {
    A <- sample(maxSigPerVox$avgMI, nrow(maxSigPerVox$reROIs), replace=T) 
    B <- sample(maxSigPerVox$avgMI, nrow(maxSigPerVox), replace=T)
@@ -282,13 +290,6 @@ kk <- (replicate(1000, f()))
 hist(kk)
 quantile(kk, c(.025, .975))
 plot(density(kk))
-
-
-```
-
-
-
-
 
 
 
@@ -402,5 +403,4 @@ dev.new()
 orTitle="lFFA"
 corrplot(OrKL_all,title=orTitle, cl.lim=c(0,1), method="color", is.corr=FALSE, type="full",
 addshade="positive", addgrid.col="gray", mar=c(0,0,1,0), diag= FALSE) 
-
 
